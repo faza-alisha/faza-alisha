@@ -1,0 +1,290 @@
+---
+title: "TA SGSTAR Spasial 1"
+author: "Faza Alisha Ramadina (10820028)"
+date: "2024-05-17"
+output: word_document
+---
+
+**1. Import Library**
+```{r}
+library(gstar)
+library(tseries)
+library(timeSeries)
+library(starma)
+library(TSA)
+library(dplyr)
+library(sgstar)
+library(forecast)
+library(xts)
+library(readxl)
+library(ggplot2)
+library(stats)
+library(sgstar)
+library(tidyr)
+library(Hmisc)
+library(ggcorrplot)
+library(utils)
+```
+
+**2. Matriks Bobot**
+```{r}
+# Import Data Koordinat
+library(readxl)
+data_jarak <- read_excel("Jarak_Daerah_Jawa_Barat.xlsx", 
+    sheet = "Koordinat_10")
+
+# Matriks Bobot Invers Jarak
+z = dist(data_jarak, method = "euclidean")
+z = as.matrix(z)
+z[is.infinite(z)] <- 0
+(WIJ <- z / rowSums(as.data.frame(z)))
+```
+
+**3. Import dan Pemusatan Data**
+```{r}
+# Data padi bulanan no diff (data asli)
+data <- read_excel("data_TA2.xlsx", 
+    sheet = "Padi_Bulanan")
+data = data[,2:11]
+t(data[nrow(data) - 1, ])
+
+# # Define the time index (for example, assuming each row represents a specific time point)
+# time_index <- seq(as.Date("2018-01-01"), by = "month", length.out = nrow(data))
+# 
+# # Convert the matrix into an xts object
+# xts_data <- xts(data, order.by = time_index)
+# 
+# # Print the xts object
+# print(xts_data)
+# 
+# Centered the data
+# Calculate column means
+(col_means <- colMeans(data))
+# 
+# Center the data
+centered_data <- data - col_means
+# 
+# # Print the centered data
+# print(centered_data)
+# 
+# # DATA TRAIN 1 to 58, test 59 to 72
+# (centered_data_train = centered_data[1:58,])
+```
+
+**4. Identifikasi Model**
+```{r}
+#STACF
+stacf(centered_data,WIJ, tlag.max=30, plot=c(TRUE), 
+use.ggplot=TRUE)
+stacf(centered_data,WIJ, tlag.max=30, plot=c(FALSE), 
+use.ggplot=TRUE)
+
+#STPACF
+stpacf(centered_data, WIJ, tlag.max=15, plot=c(TRUE), 
+use.ggplot=TRUE)
+stpacf(centered_data, WIJ, tlag.max=15, plot=c(FALSE), 
+use.ggplot=TRUE)
+```
+
+**5. Fitting Model**
+```{r}
+# Fitting Model Centered Data
+fit1 <- sgstar(data = data[1:64,], w = WIJ, p = 1, ps = 3, s =4)
+(plot1 <- plot_sgstar(fit1))
+
+
+# Access fitted values
+fitted_values1 <- fit1$Fitted.values
+print(fitted_values1)
+```
+**6. Parameter Estimation**
+```{r}
+# MODEL 1
+# Extract coefficients and standard deviations
+coefficients <- fit1$Coefficients[, "Coefficients"]
+standard_errors <- fit1$Coefficients[, "sd"]
+
+# Calculate t-values
+(t_values <- coefficients / standard_errors)
+
+# Calculate degrees of freedom
+(n <- nrow(data[1:64,]))  # Number of observations
+(p <- ncol(data[1:64,]))  # Number of parameters including intercept
+df <- n - p  # Degrees of freedom
+
+# Calculate p-values
+p_values <- 2 * pt(abs(t_values), df = df, lower.tail = FALSE)
+
+# Combine coefficients and p-values
+coefficients_and_p_values <- data.frame(Coefficient = coefficients, `P-Value` = p_values)
+
+# Print coefficients and p-values
+print(coefficients_and_p_values)
+```
+
+**7. Diagnostic Check In**
+```{r}
+# MODEL 1
+# Model Residual
+(Residual1 = fit1$Residual)
+
+# Performance
+performance1 <- fit1$Performance
+print(performance1)
+
+# Looping for Diagnostic Check
+par(mfrow=c(2,2))
+N <- ncol(data)
+for (i in 1:N) {
+  # Residual Plot
+  plot(Residual1[, i], type='l', main = paste("Residual Kecamatan", i))
+  abline(h=0)
+
+  # Residual ACF
+  acf(Residual1[, i], main = paste("ACF Residual Kecamatan", i))
+
+  # Residual QQ Plot
+  qqnorm(Residual1[, i], main = paste("Normalitas Residual Kecamatan", i))
+  qqline(Residual1[, i])
+
+  # Residual Histogram
+  hist(Residual1[, i], main = paste("Histogram Residual Kecamatan", i)) 
+
+  # Uji Kenormalan Residual
+  print(shapiro.test(Residual1[,i]))
+
+  # Uji Independensi Residual 
+  print(Box.test(Residual1[,i], lag = 20, type = "Ljung-Box"))
+
+}
+```
+
+**8. Diagnostic Check Out**
+```{r}
+# MODEL 1
+# Prediction from Data Train
+(pre = predict_sgstar(fit1, 20))
+
+# Looping for Residual Out
+par(mfrow=c(2,2))
+
+N <- ncol(data)
+
+#Inisiate Variable
+total_rmse = 0
+total_mape = 0
+
+# Looping for RMSE and MAPE
+
+for (i in 1:N) {
+# Fitted Data
+(pre_bb =as.matrix(pre[1:8, i]))
+
+# Data Test
+(val_bb = as.matrix(data[65:72, i]))
+
+# Residual Value
+(residual_bb_out = - pre_bb + val_bb)
+
+# Calculate MAPE
+mape <- mean(abs(residual_bb_out / val_bb)) * 100
+
+# Print MAPE
+print(paste("MAPE:", mape))
+
+# Accumulate MAPE
+total_mape <- total_mape + mape
+}
+
+# Average MAPE
+avg_mape <- total_mape / N
+print(paste("Average MAPE:", avg_mape))
+```
+
+**9. Forecast**
+Ini versi fit 2 
+```{r}
+WIJ = as.matrix(WIJ)
+(WIJ)
+
+# Input the Variables
+
+# Phi10
+(phi10 <- diag(coefficients[1:10]))
+
+# Phi11
+phi11 <- diag(coefficients[11:20])
+
+# Phi10_4
+phi10_4 <- diag(coefficients[21:30])
+
+# Phi20_4
+phi20_4 <- diag(coefficients[31:40])
+
+# Phi30_4
+phi30_4 <- diag(coefficients[41:50])
+
+# Phi11_4
+phi11_4 <- diag(coefficients[51:60])
+
+# Phi21_4
+phi21_4 <- diag(coefficients[61:70])
+
+# Phi31_4
+phi31_4 <- diag(coefficients[71:80])
+
+# Looping
+
+# Function to predict next values recursively
+predict_next <- function(data1, phi10, phi11, phi10_4, phi20_4, phi30_4, phi11_4, phi21_4, phi31_4, WIJ, steps) {
+  for (i in 1:steps) {
+    next_val <- phi10 %*% t(data1[nrow(data1), ]) + phi11 %*% WIJ %*% t(data1[nrow(data1), ]) + phi10_4 %*% t(data1[nrow(data1) - 3, ]) + phi11_4 %*% WIJ %*% t(data1[nrow(data1) - 3, ]) + phi20_4 %*% t(data1[nrow(data1) - 7, ])  + phi21_4 %*% WIJ %*% t(data1[nrow(data1) - 7, ]) + phi30_4 %*% t(data1[nrow(data1) - 11, ]) + phi31_4 %*% WIJ %*% t(data1[nrow(data1) - 11, ]) 
+    next_val <- t(data.frame(next_val)) # 1x10
+    colnames(next_val) <- c("bandung_barat","bandung","bogor","ciamis","cianjur",
+                            "cirebon","garut","sukabumi","sumedang","tasikmalaya")
+    data1 <- rbind(data1, next_val) # rbind colnamesnya harus sama
+  }
+  return(data1)
+}
+
+# Predict next 5 values
+predictions <- predict_next(data, phi10, phi11, phi10_4, phi20_4, phi30_4, phi11_4, phi21_4, phi31_4, WIJ, 12)
+print(predictions)
+
+
+# Plot Predictions
+# Load necessary libraries
+library(ggplot2)
+library(tidyverse)
+
+# Example data frame (replace this with your actual data)
+# Uncomment and replace the example with your actual data
+# predictions <- data.frame(matrix(rnorm(77 * 10), nrow = 77, ncol = 10))
+# colnames(predictions) <- paste("Var", 1:10, sep = "_")
+
+# Ensure that 'predictions' is your actual data frame
+if (!exists("predictions_a")) {
+  stop("The 'predictions_a' data frame does not exist. Please load your data.")
+}
+
+# Convert data to long format for easier plotting
+data_long <- pivot_longer(predictions_a, cols = everything(), names_to = "Variable", values_to = "Value")
+
+# Create a line plot for each column
+plot <- ggplot(data_long, aes(x = rep(1:84, times = ncol(predictions_a)), y = Value, color = Variable)) +
+  geom_line() +
+  facet_wrap(~ Variable, scales = "free_y") + 
+  labs(x = "Index", y = "Value", title = "Line Plots for Each Column") +
+  theme_minimal() +
+  theme(legend.position = "none") # Hide legend since facet titles already provide column names
+
+# Display the plot in interactive sessions
+print(plot)
+
+# Save the plot to a file
+ggsave("line_plots.png", plot)
+
+```
+
+
+
